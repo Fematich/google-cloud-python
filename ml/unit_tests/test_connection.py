@@ -11,3 +11,26 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+import unittest
+
+
+class TestConnection(unittest.TestCase):
+
+    def _getTargetClass(self):
+        from google.cloud.ml.connection import Connection
+        return Connection
+
+    def _makeOne(self, *args, **kw):
+        return self._getTargetClass()(*args, **kw)
+
+    def test_build_api_url(self):
+        conn = self._makeOne()
+        method = 'projects/projectid:getConfig'
+        uri = '/'.join([
+            conn.API_BASE_URL,
+            conn.API_VERSION,
+            method,
+        ])
+
+        self.assertEqual(conn.build_api_url(method), uri)

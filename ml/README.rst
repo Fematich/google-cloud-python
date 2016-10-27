@@ -1,20 +1,20 @@
-Python Client for Google Cloud CloudML
+Python Client for Google Cloud ML
 =====================================
 
-    Python idiomatic client for `Google Cloud CloudML`_
+    Python idiomatic client for `Google Cloud ML`_
 
-.. _Google Cloud Speech: https://cloud.google.com/cloudml/
+.. _Google Cloud ML: https://cloud.google.com/cloudml/
 
 -  `Documentation`_
 
-.. _Documentation: https://googlecloudplatform.github.io/google-cloud-python/stable/cloudml-usage.html
+.. _Documentation: https://googlecloudplatform.github.io/google-cloud-python/stable/ml-usage.html
 
 Quick Start
 -----------
 
 .. code-block:: console
 
-    $ pip install --upgrade google-cloud-cloudml
+    $ pip install --upgrade google-cloud-ml
 
 Authentication
 --------------
@@ -34,9 +34,9 @@ Using the API
 enabling you to easily build machine learning models, that work on any type of data, of any size, using
 the powerful TensorFlow framework.
 
-.. _Cloud Speech API: https://cloud.google.com/speech/
+.. _Cloud ML API: https://cloud.google.com/ml/
 
 See the ``google-cloud-python`` API `cloudml documentation`_ to learn how to
-connect to the Google Cloud CloudML API using this Client Library.
+connect to the Google Cloud ML API using this Client Library.
 
-.. _cloudml documentation: https://googlecloudplatform.github.io/google-cloud-python/stable/cloudml-usage.html
+.. _cloudml documentation: https://googlecloudplatform.github.io/google-cloud-python/stable/ml-usage.html
