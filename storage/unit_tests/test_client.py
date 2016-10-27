@@ -376,11 +376,12 @@ class TestClient(unittest.TestCase):
         credentials = _Credentials()
         client = self._makeOne(project=project, credentials=credentials)
         iterator = client.list_buckets()
-        page = Page(iterator, {}, iterator._items_key, None)
+        page = Page(iterator, (), None)
         iterator._page = page
         self.assertEqual(list(page), [])
 
     def test_page_non_empty_response(self):
+        import six
         from google.cloud.storage.bucket import Bucket
 
         project = 'PROJECT'
@@ -396,10 +397,9 @@ class TestClient(unittest.TestCase):
         iterator = client.list_buckets()
         iterator._get_next_page_response = dummy_response
 
-        iterator.update_page()
-        page = iterator.page
+        page = six.next(iterator.pages)
         self.assertEqual(page.num_items, 1)
-        bucket = iterator.next()
+        bucket = six.next(page)
         self.assertEqual(page.remaining, 0)
         self.assertIsInstance(bucket, Bucket)
         self.assertEqual(bucket.name, blob_name)

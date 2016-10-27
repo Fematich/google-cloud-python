@@ -58,6 +58,30 @@ def setUpModule():
         Config.CLIENT = client.Client()
 
 
+def _consume_topics(pubsub_client):
+    """Consume entire iterator.
+
+    :type pubsub_client: :class:`~google.cloud.pubsub.client.Client`
+    :param pubsub_client: Client to use to retrieve topics.
+
+    :rtype: list
+    :returns: List of all topics encountered.
+    """
+    return list(pubsub_client.list_topics())
+
+
+def _consume_subscriptions(topic):
+    """Consume entire iterator.
+
+    :type topic: :class:`~google.cloud.pubsub.topic.Topic`
+    :param topic: Topic to use to retrieve subscriptions.
+
+    :rtype: list
+    :returns: List of all subscriptions encountered.
+    """
+    return list(topic.list_subscriptions())
+
+
 class TestPubsub(unittest.TestCase):
 
     def setUp(self):
@@ -77,7 +101,7 @@ class TestPubsub(unittest.TestCase):
         self.assertEqual(topic.name, topic_name)
 
     def test_list_topics(self):
-        before, _ = Config.CLIENT.list_topics()
+        before = _consume_topics(Config.CLIENT)
         topics_to_create = [
             'new' + unique_resource_id(),
             'newer' + unique_resource_id(),
@@ -90,10 +114,10 @@ class TestPubsub(unittest.TestCase):
 
         # Retrieve the topics.
         def _all_created(result):
-            return len(result[0]) == len(before) + len(topics_to_create)
+            return len(result) == len(before) + len(topics_to_create)
 
         retry = RetryResult(_all_created)
-        after, _ = retry(Config.CLIENT.list_topics)()
+        after = retry(_consume_topics)(Config.CLIENT)
 
         created = [topic for topic in after
                    if topic.name in topics_to_create and
@@ -136,7 +160,7 @@ class TestPubsub(unittest.TestCase):
         topic = Config.CLIENT.topic(TOPIC_NAME)
         topic.create()
         self.to_delete.append(topic)
-        empty, _ = topic.list_subscriptions()
+        empty = _consume_subscriptions(topic)
         self.assertEqual(len(empty), 0)
         subscriptions_to_create = [
             'new' + unique_resource_id(),
@@ -150,10 +174,10 @@ class TestPubsub(unittest.TestCase):
 
         # Retrieve the subscriptions.
         def _all_created(result):
-            return len(result[0]) == len(subscriptions_to_create)
+            return len(result) == len(subscriptions_to_create)
 
         retry = RetryResult(_all_created)
-        all_subscriptions, _ = retry(topic.list_subscriptions)()
+        all_subscriptions = retry(_consume_subscriptions)(topic)
 
         created = [subscription for subscription in all_subscriptions
                    if subscription.name in subscriptions_to_create]

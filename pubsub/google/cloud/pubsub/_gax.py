@@ -29,6 +29,10 @@ from google.cloud._helpers import _to_bytes
 from google.cloud._helpers import _pb_timestamp_to_rfc3339
 from google.cloud.exceptions import Conflict
 from google.cloud.exceptions import NotFound
+from google.cloud.iterator import GAXIterator
+from google.cloud.pubsub._helpers import subscription_name_from_path
+from google.cloud.pubsub.subscription import Subscription
+from google.cloud.pubsub.topic import Topic
 
 
 class _PublisherAPI(object):
@@ -36,9 +40,14 @@ class _PublisherAPI(object):
 
     :type gax_api: :class:`google.pubsub.v1.publisher_api.PublisherApi`
     :param gax_api: API object used to make GAX requests.
+
+    :type client: :class:`~google.cloud.pubsub.client.Client`
+    :param client: The client that owns this API object.
     """
-    def __init__(self, gax_api):
+
+    def __init__(self, gax_api, client):
         self._gax_api = gax_api
+        self._client = client
 
     def list_topics(self, project, page_size=0, page_token=None):
         """List topics for the project associated with this API.
@@ -58,11 +67,9 @@ class _PublisherAPI(object):
                            passed, the API will return the first page of
                            topics.
 
-        :rtype: tuple, (list, str)
-        :returns: list of ``Topic`` resource dicts, plus a
-                  "next page token" string:  if not None, indicates that
-                  more topics can be retrieved with another call (pass that
-                  value as ``page_token``).
+        :rtype: :class:`~google.cloud.iterator.Iterator`
+        :returns: Iterator of :class:`~google.cloud.pubsub.topic.Topic`
+                  accessible to the current API.
         """
         if page_token is None:
             page_token = INITIAL_PAGE
@@ -70,9 +77,12 @@ class _PublisherAPI(object):
         path = 'projects/%s' % (project,)
         page_iter = self._gax_api.list_topics(
             path, page_size=page_size, options=options)
-        topics = [{'name': topic_pb.name} for topic_pb in page_iter.next()]
-        token = page_iter.page_token or None
-        return topics, token
+
+        iter_kwargs = {}
+        if page_size:  # page_size can be 0 or explicit None.
+            iter_kwargs['max_results'] = page_size
+        return GAXIterator(self._client, page_iter, _item_to_topic,
+                           **iter_kwargs)
 
     def topic_create(self, topic_path):
         """API call:  create a topic
@@ -167,16 +177,14 @@ class _PublisherAPI(object):
             raise
         return result.message_ids
 
-    def topic_list_subscriptions(self, topic_path, page_size=0,
-                                 page_token=None):
+    def topic_list_subscriptions(self, topic, page_size=0, page_token=None):
         """API call:  list subscriptions bound to a topic
 
         See:
         https://cloud.google.com/pubsub/docs/reference/rest/v1/projects.topics.subscriptions/list
 
-        :type topic_path: str
-        :param topic_path: fully-qualified path of the topic, in format
-                            ``projects/<PROJECT>/topics/<TOPIC_NAME>``.
+        :type topic: :class:`~google.cloud.pubsub.topic.Topic`
+        :param topic: The topic that owns the subscriptions.
 
         :type page_size: int
         :param page_size: maximum number of subscriptions to return, If not
@@ -187,15 +195,17 @@ class _PublisherAPI(object):
                            If not passed, the API will return the first page
                            of subscriptions.
 
-        :rtype: list of strings
-        :returns: fully-qualified names of subscriptions for the supplied
-                topic.
-        :raises: :exc:`google.cloud.exceptions.NotFound` if the topic does not
-                    exist
+        :rtype: :class:`~google.cloud.iterator.Iterator`
+        :returns: Iterator of
+                  :class:`~google.cloud.pubsub.subscription.Subscription`
+                  accessible to the current API.
+        :raises: :exc:`~google.cloud.exceptions.NotFound` if the topic does
+                  not exist.
         """
         if page_token is None:
             page_token = INITIAL_PAGE
         options = CallOptions(page_token=page_token)
+        topic_path = topic.full_name
         try:
             page_iter = self._gax_api.list_topic_subscriptions(
                 topic_path, page_size=page_size, options=options)
@@ -203,9 +213,14 @@ class _PublisherAPI(object):
             if exc_to_code(exc.cause) == StatusCode.NOT_FOUND:
                 raise NotFound(topic_path)
             raise
-        subs = page_iter.next()
-        token = page_iter.page_token or None
-        return subs, token
+
+        iter_kwargs = {}
+        if page_size:  # page_size can be 0 or explicit None.
+            iter_kwargs['max_results'] = page_size
+        iterator = GAXIterator(self._client, page_iter,
+                               _item_to_subscription, **iter_kwargs)
+        iterator.topic = topic
+        return iterator
 
 
 class _SubscriberAPI(object):
@@ -543,3 +558,36 @@ def make_gax_subscriber_api(connection):
     if connection.in_emulator:
         channel = insecure_channel(connection.host)
     return SubscriberApi(channel=channel)
+
+
+def _item_to_topic(iterator, resource):
+    """Convert a protobuf topic to the native object.
+
+    :type iterator: :class:`~google.cloud.iterator.Iterator`
+    :param iterator: The iterator that is currently in use.
+
+    :type resource: :class:`google.pubsub.v1.pubsub_pb2.Topic`
+    :param resource: A topic returned from the API.
+
+    :rtype: :class:`~google.cloud.pubsub.topic.Topic`
+    :returns: The next topic in the page.
+    """
+    return Topic.from_api_repr(
+        {'name': resource.name}, iterator.client)
+
+
+def _item_to_subscription(iterator, subscription_path):
+    """Convert a subscription name to the native object.
+
+    :type iterator: :class:`~google.cloud.iterator.Iterator`
+    :param iterator: The iterator that is currently in use.
+
+    :type subscription_path: str
+    :param subscription_path: Subscription path returned from the API.
+
+    :rtype: :class:`~google.cloud.pubsub.subscription.Subscription`
+    :returns: The next subscription in the page.
+    """
+    subscription_name = subscription_name_from_path(
+        subscription_path, iterator.client.project)
+    return Subscription(subscription_name, iterator.topic)

@@ -14,10 +14,15 @@
 
 """Create / interact with Google Cloud Pub/Sub connections."""
 
+import base64
 import os
 
 from google.cloud import connection as base_connection
 from google.cloud.environment_vars import PUBSUB_EMULATOR
+from google.cloud.iterator import HTTPIterator
+from google.cloud.pubsub._helpers import subscription_name_from_path
+from google.cloud.pubsub.subscription import Subscription
+from google.cloud.pubsub.topic import Topic
 
 
 PUBSUB_API_HOST = 'pubsub.googleapis.com'
@@ -96,12 +101,13 @@ class Connection(base_connection.JSONConnection):
 class _PublisherAPI(object):
     """Helper mapping publisher-related APIs.
 
-    :type connection: :class:`Connection`
-    :param connection: the connection used to make API requests.
+    :type client: :class:`~google.cloud.pubsub.client.Client`
+    :param client: the client used to make API requests.
     """
 
-    def __init__(self, connection):
-        self._connection = connection
+    def __init__(self, client):
+        self._client = client
+        self._connection = client.connection
 
     def list_topics(self, project, page_size=None, page_token=None):
         """API call:  list topics for a given project
@@ -121,24 +127,19 @@ class _PublisherAPI(object):
                            passed, the API will return the first page of
                            topics.
 
-        :rtype: tuple, (list, str)
-        :returns: list of ``Topic`` resource dicts, plus a
-                  "next page token" string:  if not None, indicates that
-                  more topics can be retrieved with another call (pass that
-                  value as ``page_token``).
+        :rtype: :class:`~google.cloud.iterator.Iterator`
+        :returns: Iterator of :class:`~google.cloud.pubsub.topic.Topic`
+                  accessible to the current connection.
         """
-        conn = self._connection
-        params = {}
-
+        extra_params = {}
         if page_size is not None:
-            params['pageSize'] = page_size
-
-        if page_token is not None:
-            params['pageToken'] = page_token
-
+            extra_params['pageSize'] = page_size
         path = '/projects/%s/topics' % (project,)
-        resp = conn.api_request(method='GET', path=path, query_params=params)
-        return resp.get('topics', ()), resp.get('nextPageToken')
+
+        return HTTPIterator(
+            client=self._client, path=path, item_to_value=_item_to_topic,
+            items_key='topics', page_token=page_token,
+            extra_params=extra_params)
 
     def topic_create(self, topic_path):
         """API call:  create a topic
@@ -201,22 +202,21 @@ class _PublisherAPI(object):
         :rtype: list of string
         :returns: list of opaque IDs for published messages.
         """
+        _transform_messages_base64(messages, _base64_unicode)
         conn = self._connection
         data = {'messages': messages}
         response = conn.api_request(
             method='POST', path='/%s:publish' % (topic_path,), data=data)
         return response['messageIds']
 
-    def topic_list_subscriptions(self, topic_path, page_size=None,
-                                 page_token=None):
+    def topic_list_subscriptions(self, topic, page_size=None, page_token=None):
         """API call:  list subscriptions bound to a topic
 
         See:
         https://cloud.google.com/pubsub/docs/reference/rest/v1/projects.topics.subscriptions/list
 
-        :type topic_path: str
-        :param topic_path: the fully-qualified path of the topic, in format
-                           ``projects/<PROJECT>/topics/<TOPIC_NAME>``.
+        :type topic: :class:`~google.cloud.pubsub.topic.Topic`
+        :param topic: The topic that owns the subscriptions.
 
         :type page_size: int
         :param page_size: maximum number of subscriptions to return, If not
@@ -231,18 +231,17 @@ class _PublisherAPI(object):
         :returns: fully-qualified names of subscriptions for the supplied
                   topic.
         """
-        conn = self._connection
-        params = {}
-
+        extra_params = {}
         if page_size is not None:
-            params['pageSize'] = page_size
+            extra_params['pageSize'] = page_size
+        path = '/%s/subscriptions' % (topic.full_name,)
 
-        if page_token is not None:
-            params['pageToken'] = page_token
-
-        path = '/%s/subscriptions' % (topic_path,)
-        resp = conn.api_request(method='GET', path=path, query_params=params)
-        return resp.get('subscriptions', ()), resp.get('nextPageToken')
+        iterator = HTTPIterator(
+            client=self._client, path=path,
+            item_to_value=_item_to_subscription, items_key='subscriptions',
+            page_token=page_token, extra_params=extra_params)
+        iterator.topic = topic
+        return iterator
 
 
 class _SubscriberAPI(object):
@@ -420,7 +419,9 @@ class _SubscriberAPI(object):
             'maxMessages': max_messages,
         }
         response = conn.api_request(method='POST', path=path, data=data)
-        return response.get('receivedMessages', ())
+        messages = response.get('receivedMessages', ())
+        _transform_messages_base64(messages, base64.b64decode, 'message')
+        return messages
 
     def subscription_acknowledge(self, subscription_path, ack_ids):
         """API call:  acknowledge retrieved messages
@@ -540,3 +541,67 @@ class _IAMPolicyAPI(object):
         path = '/%s:testIamPermissions' % (target_path,)
         resp = conn.api_request(method='POST', path=path, data=wrapped)
         return resp.get('permissions', [])
+
+
+def _base64_unicode(value):
+    """Helper to base64 encode and make JSON serializable.
+
+    :type value: str
+    :param value: String value to be base64 encoded and made serializable.
+
+    :rtype: str
+    :returns: Base64 encoded string/unicode value.
+    """
+    as_bytes = base64.b64encode(value)
+    return as_bytes.decode('ascii')
+
+
+def _transform_messages_base64(messages, transform, key=None):
+    """Helper for base64 encoding and decoding messages.
+
+    :type messages: list
+    :param messages: List of dictionaries with message data.
+
+    :type transform: :class:`~types.FunctionType`
+    :param transform: Function to encode/decode the message data.
+
+    :type key: str
+    :param key: Index to access messages.
+    """
+    for message in messages:
+        if key is not None:
+            message = message[key]
+        if 'data' in message:
+            message['data'] = transform(message['data'])
+
+
+def _item_to_topic(iterator, resource):
+    """Convert a JSON topic to the native object.
+
+    :type iterator: :class:`~google.cloud.iterator.Iterator`
+    :param iterator: The iterator that is currently in use.
+
+    :type resource: dict
+    :param resource: A topic returned from the API.
+
+    :rtype: :class:`~google.cloud.pubsub.topic.Topic`
+    :returns: The next topic in the page.
+    """
+    return Topic.from_api_repr(resource, iterator.client)
+
+
+def _item_to_subscription(iterator, subscription_path):
+    """Convert a subscription name to the native object.
+
+    :type iterator: :class:`~google.cloud.iterator.Iterator`
+    :param iterator: The iterator that is currently in use.
+
+    :type subscription_path: str
+    :param subscription_path: Subscription path returned from the API.
+
+    :rtype: :class:`~google.cloud.pubsub.subscription.Subscription`
+    :returns: The next subscription in the page.
+    """
+    subscription_name = subscription_name_from_path(
+        subscription_path, iterator.client.project)
+    return Subscription(subscription_name, iterator.topic)

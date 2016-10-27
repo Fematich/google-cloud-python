@@ -14,12 +14,9 @@
 
 """Define API Topics."""
 
-import base64
-
 from google.cloud._helpers import _datetime_to_rfc3339
 from google.cloud._helpers import _NOW
 from google.cloud.exceptions import NotFound
-from google.cloud.pubsub._helpers import subscription_name_from_path
 from google.cloud.pubsub._helpers import topic_name_from_path
 from google.cloud.pubsub.iam import Policy
 from google.cloud.pubsub.subscription import Subscription
@@ -252,8 +249,7 @@ class Topic(object):
         api = client.publisher_api
 
         self._timestamp_message(attrs)
-        message_b = base64.b64encode(message).decode('ascii')
-        message_data = {'data': message_b, 'attributes': attrs}
+        message_data = {'data': message, 'attributes': attrs}
         message_ids = api.topic_publish(self.full_name, [message_data])
         return message_ids[0]
 
@@ -309,21 +305,14 @@ class Topic(object):
         :param client: the client to use.  If not passed, falls back to the
                        ``client`` stored on the current topic.
 
-        :rtype: tuple, (list, str)
-        :returns: list of :class:`~.pubsub.subscription.Subscription`,
-                  plus a "next page token" string:  if not None, indicates that
-                  more topics can be retrieved with another call (pass that
-                  value as ``page_token``).
+        :rtype: :class:`~google.cloud.iterator.Iterator`
+        :returns: Iterator of
+                  :class:`~google.cloud.pubsub.subscription.Subscription`
+                  accessible to the current topic.
         """
         client = self._require_client(client)
         api = client.publisher_api
-        sub_paths, next_token = api.topic_list_subscriptions(
-            self.full_name, page_size, page_token)
-        subscriptions = []
-        for sub_path in sub_paths:
-            sub_name = subscription_name_from_path(sub_path, self.project)
-            subscriptions.append(Subscription(sub_name, self))
-        return subscriptions, next_token
+        return api.topic_list_subscriptions(self, page_size, page_token)
 
     def get_iam_policy(self, client=None):
         """Fetch the IAM policy for the topic.
@@ -449,7 +438,7 @@ class Batch(object):
         """
         self.topic._timestamp_message(attrs)
         self.messages.append(
-            {'data': base64.b64encode(message).decode('ascii'),
+            {'data': message,
              'attributes': attrs})
 
     def commit(self, client=None):

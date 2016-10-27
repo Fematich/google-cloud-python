@@ -20,7 +20,7 @@ import six
 
 from google.cloud._helpers import _rfc3339_to_datetime
 from google.cloud.exceptions import NotFound
-from google.cloud.iterator import Iterator
+from google.cloud.iterator import HTTPIterator
 from google.cloud.storage._helpers import _PropertyMixin
 from google.cloud.storage._helpers import _scalar_property
 from google.cloud.storage.acl import BucketACL
@@ -306,7 +306,7 @@ class Bucket(_PropertyMixin):
 
         client = self._require_client(client)
         path = self.path + '/o'
-        iterator = Iterator(
+        iterator = HTTPIterator(
             client=client, path=path, item_to_value=_item_to_blob,
             page_token=page_token, max_results=max_results,
             extra_params=extra_params, page_start=_blobs_page_start)
@@ -511,10 +511,13 @@ class Bucket(_PropertyMixin):
 
     @property
     def cors(self):
-        """Retrieve CORS policies configured for this bucket.
+        """Retrieve or set CORS policies configured for this bucket.
 
         See: http://www.w3.org/TR/cors/ and
              https://cloud.google.com/storage/docs/json_api/v1/buckets
+
+        :setter: Set CORS policies for this bucket.
+        :getter: Gets the CORS policies for this bucket.
 
         :rtype: list of dictionaries
         :returns: A sequence of mappings describing each CORS policy.
@@ -602,7 +605,7 @@ class Bucket(_PropertyMixin):
     def enable_logging(self, bucket_name, object_prefix=''):
         """Enable access logging for this bucket.
 
-        See: https://cloud.google.com/storage/docs/accesslogs#delivery
+        See: https://cloud.google.com/storage/docs/accesslogs
 
         :type bucket_name: str
         :param bucket_name: name of bucket in which to store access logs

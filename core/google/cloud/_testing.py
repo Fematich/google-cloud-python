@@ -15,6 +15,10 @@
 """Shared testing utilities."""
 
 
+# Avoid the grpc and google.cloud.grpc collision.
+from __future__ import absolute_import
+
+
 class _Monkey(object):
     # context-manager for replacing module names in the scope of a test.
 
@@ -76,10 +80,15 @@ class _GAXBaseAPI(object):
 
 class _GAXPageIterator(object):
 
-    def __init__(self, items, page_token):
-        self._items = items
-        self.page_token = page_token
+    def __init__(self, *pages, **kwargs):
+        self._pages = iter(pages)
+        self.page_token = kwargs.get('page_token')
 
     def next(self):
-        items, self._items = self._items, None
-        return items
+        import six
+        return six.next(self._pages)
+
+    __next__ = next
+
+    def __iter__(self):
+        return self
